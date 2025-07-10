@@ -1,68 +1,68 @@
 import os
-
 import pytest
+from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from config.data import TEST_CONFIG
 
 @pytest.fixture(scope="function")
 def driver(request):
-    """
-    Conftest to Initialize Selenium Webdriver tests.
-    1. Opens the browser.
-    2. Opens URL.
-    3. Maximizes browser window.
-    Args:
-    request (object): gives access to the requesting test context.
-    Raises: NA
-    Returns: selenium webdriver instance
-    """
-    hub_host = ""
-    if os.getenv("browser") is None or os.getenv("browser") == "chrome":
-        chrome_options = webdriver.ChromeOptions()
+    browser = os.getenv("browser", "chrome").lower()
+    hub_host = os.getenv("hub_host", "localhost")
+    dashboard_url = os.getenv("dashboard_url", TEST_CONFIG.url)
+
+    if browser == "chrome":
+        chrome_options = ChromeOptions()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("disable-infobars")
         chrome_options.add_argument("enable-automation")
-        wdriver = webdriver.Chrome(service=ChromeService(), options=chrome_options)
-    else:
-        fp = webdriver.FirefoxProfile()
-        fp.set_preference("dom.max_chrome_script_run_time", 60)
-        fp.set_preference("dom.max_script_run_time", 60)
-        firefox_options = webdriver.FirefoxOptions()
-        firefox_options.add_argument("--headless")
-        firefox_options.add_argument("--no-sandbox")
-        firefox_options.add_argument("--disable-extensions")
-        firefox_options.add_argument("disable-infobars")
-        firefox_options.add_argument("enable-automation")
-        firefox_options.accept_insecure_certs = True
-
-        fp = webdriver.FirefoxProfile()
-        fp.accept_untrusted_certs = True
-        firefox_options.profile = fp
+        chrome_options.add_argument("--ignore-certificate-errors")
+        chrome_options.accept_insecure_certs = True
 
         wdriver = webdriver.Remote(
-            command_executor="http://{}:4444".format(hub_host),
-            desired_capabilities={
-                "browserName": "firefox",
-                "javascriptEnabled": True,
-                "acceptSslCerts": True,
-                "acceptInsecureCerts": True,
-            },
-            options=firefox_options,
+            command_executor=f"http://{hub_host}:4444/wd/hub",
+            options=chrome_options
         )
+
+    elif browser == "firefox":
+        firefox_options = FirefoxOptions()
+        firefox_options.add_argument("--headless")
+        firefox_options.add_argument("--no-sandbox")
+        firefox_options.accept_insecure_certs = True
+
+        wdriver = webdriver.Remote(
+            command_executor=f"http://{hub_host}:4444/wd/hub",
+            options=firefox_options
+        )
+
+    else:
+        raise ValueError(f"Unsupported browser: {browser}")
 
     wdriver.maximize_window()
     wdriver.set_page_load_timeout(50)
     wdriver.implicitly_wait(10)
     wdriver.set_script_timeout(10)
-    product_url = ""  # dashboard url
-    wdriver.get("http://{product_url}".format(product_url=product_url))
 
-    def end():
-        wdriver.quit()
-        # display.stop()
+    wdriver.get(dashboard_url)
 
-    request.addfinalizer(end)
-    return wdriver
+    yield wdriver
+    wdriver.quit()
+
+@pytest.fixture
+def screenshot():
+    def take_screenshot(driver, name=None):
+        os.makedirs("screenshots", exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{name or 'screenshot'}_{timestamp}.png"
+        path = os.path.join("screenshots", filename)
+        try:
+            driver.save_screenshot(path)
+            print(f"[📸] Screenshot saved at: {path}")
+        except Exception as e:
+            print(f"[❌] Failed to capture screenshot: {e}")
+        return path
+    return take_screenshot
+
